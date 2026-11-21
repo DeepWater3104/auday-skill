@@ -1,4 +1,4 @@
-"""Finish the Windows bootstrap using its verified private base interpreter."""
+"""Finish the Windows or Linux bootstrap using its verified private base interpreter."""
 
 import json
 from pathlib import Path
@@ -10,13 +10,14 @@ from setup_runtime import ensure_windows_link, managed_env
 
 def main(arguments=None):
     arguments = list(sys.argv[1:] if arguments is None else arguments)
-    if sys.platform != "win32":
-        raise ValueError("windows_bootstrap_requires_windows")
+    if sys.platform != "win32" and not sys.platform.startswith("linux"):
+        raise ValueError("windows_bootstrap_requires_windows_or_linux")
     if len(arguments) < 2 or arguments[0] != "--home":
         raise ValueError("bootstrap_home_required")
     root = Path(arguments[1]).resolve()
     # ensure_windows_link and managed_env place runtimes through support_root,
-    # which follows the AUDAY_RUNTIME_ROOT decision made by bootstrap.ps1.
+    # which follows the AUDAY_RUNTIME_ROOT decision made by bootstrap.ps1 or,
+    # on Linux, bootstrap.sh.
     python = ensure_windows_link(root, python_path=sys.executable)
     # Use a subprocess instead of Windows exec emulation so the parent reliably
     # receives the client's final exit status, stdout JSON and stderr progress.

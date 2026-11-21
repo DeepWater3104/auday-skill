@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Windows Auday link: the existing iPhone TLS-PSK protocol, with no app changes.
+"""Windows and Linux Auday link: the existing iPhone TLS-PSK protocol, with no app changes.
 
 Requires Python 3.13+ built with PSK and the pinned discovery dependencies.
 Protocol functions remain importable on other hosts for synthetic interop tests.
@@ -19,7 +19,10 @@ import sysconfig
 import threading
 import time
 
-from windows_credentials import CredentialError, read_secret, save_secret
+if sys.platform.startswith("linux"):
+    from linux_credentials import CredentialError, read_secret, save_secret
+else:
+    from windows_credentials import CredentialError, read_secret, save_secret
 
 MAXIMUM = 2 * 1024 * 1024
 IDENTITY = "auday-workflow-link-v2"
@@ -279,8 +282,49 @@ def request(destination, password, payload, timeout=10, resolved=None):
         candidates = endpoint_candidates(destination, deadline)
 
 
+def _posix_password():
+    """Read from the controlling terminal with echo off; refuse when there is none."""
+    import os
+    import termios
+    try:
+        descriptor = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        raise LinkError("pair_requires_controlling_local_terminal") from None
+    try:
+        try:
+            saved = termios.tcgetattr(descriptor)
+        except termios.error:
+            raise LinkError("pair_requires_controlling_local_terminal") from None
+        quiet = list(saved)
+        quiet[3] &= ~termios.ECHO
+        os.write(descriptor, "Auday communication password (hidden): ".encode())
+        termios.tcsetattr(descriptor, termios.TCSAFLUSH, quiet)
+        try:
+            data = b""
+            while not data.endswith(b"\n") and len(data) <= 512:
+                block = os.read(descriptor, 512)
+                if not block:
+                    break
+                data += block
+        finally:
+            termios.tcsetattr(descriptor, termios.TCSAFLUSH, saved)
+            os.write(descriptor, b"\n")
+    finally:
+        os.close(descriptor)
+    try:
+        password = data.decode("utf-8").rstrip("\r\n")
+    except UnicodeError:
+        raise LinkError("invalid_password_input") from None
+    if not password or len(password) > 128:
+        raise LinkError("invalid_password_input")
+    communication_key(password)
+    return password
+
+
 def local_password():
     """Read only from a real Windows console, never getpass's echoing fallback."""
+    if sys.platform.startswith("linux"):
+        return _posix_password()
     if sys.platform != "win32" or sys.stdin is not sys.__stdin__ or not sys.stdin.isatty():
         raise LinkError("pair_requires_controlling_local_terminal")
     import ctypes

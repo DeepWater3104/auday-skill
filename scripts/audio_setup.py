@@ -72,7 +72,7 @@ def audio_status(root):
 
 
 def _native_environment(env):
-    """Build only against Apple system tools, never a user's Homebrew prefix."""
+    """Build only against the system compiler, never a user's Homebrew prefix."""
     env = dict(env)
     env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     for name in list(env):
@@ -83,6 +83,9 @@ def _native_environment(env):
             "MAKEOVERRIDES",
         ):
             env.pop(name, None)
+    if platform.system() == "Linux":
+        env.update({"CC": "/usr/bin/cc", "CXX": "/usr/bin/c++"})
+        return env
     env.update({"CC": "/usr/bin/clang", "CXX": "/usr/bin/clang++"})
     clt = Path("/Library/Developer/CommandLineTools")
     if (clt / "usr/bin/clang").is_file():
@@ -127,6 +130,15 @@ def _probe_python(python, program, env):
 
 
 def _check_build_tools(env):
+    if platform.system() == "Linux":
+        missing = [tool for tool in ("/usr/bin/cc", "/usr/bin/c++", "/usr/bin/make")
+                   if not os.access(tool, os.X_OK)]
+        if missing:
+            raise RuntimeError(
+                "linux_build_tools_required; the user runs sudo apt install build-essential "
+                "before retrying"
+            )
+        return "/usr/bin/cc"
     try:
         clang = subprocess.check_output(
             ["/usr/bin/xcrun", "--find", "clang"], text=True, env=env,
@@ -244,10 +256,14 @@ def _prepare_mac_whisper(runtime, source, python, env, log):
             "-DCMAKE_MAKE_PROGRAM=/usr/bin/make",
             "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=OFF",
             "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_EXAMPLES=ON",
-            "-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON",
             "-DGGML_OPENMP=OFF",
-            "-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local",
         ]
+        if platform.system() == "Linux":
+            # CPU only; ggml tunes the code to this machine, where it also runs.
+            configure.append("-DCMAKE_IGNORE_PREFIX_PATH=/usr/local")
+        else:
+            configure += ["-DGGML_METAL=ON", "-DGGML_METAL_EMBED_LIBRARY=ON",
+                          "-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local"]
         if platform.machine() == "arm64":
             # By default ggml tunes the CPU code to the build machine with
             # -mcpu=native and a probe per feature. On a virtual Apple Silicon Mac
@@ -259,7 +275,7 @@ def _prepare_mac_whisper(runtime, source, python, env, log):
             # baseline (apple-m1), which every supported Mac runs. Inference itself
             # runs on Metal.
             configure.append("-DGGML_NATIVE=OFF")
-        _command(configure, log, native_env, "Configuring Whisper.cpp with Apple tools")
+        _command(configure, log, native_env, "Configuring Whisper.cpp with system tools")
         _command(
             [cmake, "--build", build, "--config", "Release",
              "--target", "whisper-cli", "-j", str(min(4, os.cpu_count() or 2))],
@@ -401,13 +417,14 @@ def setup_audio(root, model="small", diarize=True, *, uv_path=None):
     Homebrew, writes system Python, or silently selects a different model.
     """
     windows = platform.system() == "Windows"
+    linux = platform.system() == "Linux"
     from setup_runtime import ensure_uv, managed_env, managed_python_version, host_architecture
-    architecture = host_architecture() if windows else platform.machine()
-    supported = (windows and architecture in ("arm64", "x86_64")) or (
+    architecture = host_architecture() if windows or linux else platform.machine()
+    supported = ((windows or linux) and architecture in ("arm64", "x86_64")) or (
         platform.system() == "Darwin" and platform.machine() in ("arm64", "x86_64")
     )
     if not supported:
-        raise RuntimeError("managed_audio_requires_macos_or_windows_x64_or_arm64")
+        raise RuntimeError("managed_audio_requires_macos_linux_or_windows_x64_or_arm64")
     if model not in MANIFEST["models"]:
         raise ValueError("audio_model_must_be_small_or_turbo")
     if windows and architecture == "x86_64":
@@ -448,7 +465,7 @@ def setup_audio(root, model="small", diarize=True, *, uv_path=None):
     if windows and architecture == "arm64":
         ffmpeg = _prepare_windows_arm64_ffmpeg(runtime)
     else:
-        ffmpeg_pattern = "ffmpeg-win*.exe" if windows else "ffmpeg-macos*"
+        ffmpeg_pattern = "ffmpeg-win*.exe" if windows else "ffmpeg-linux*" if linux else "ffmpeg-macos*"
         ffmpeg = Path(_probe_python(
             python,
             "import imageio_ffmpeg,pathlib; "
@@ -473,7 +490,7 @@ def setup_audio(root, model="small", diarize=True, *, uv_path=None):
         "schemaVersion": 1, "modelPreset": model,
         "python": str(python), "ffmpeg": str(ffmpeg), "whisperCLI": str(whisper),
         "model": str(model_path), "sourceRevision": source_asset["revision"],
-        "platform": ("windows-" if windows else "macos-") + architecture,
+        "platform": ("windows-" if windows else "linux-" if linux else "macos-") + architecture,
         "architecture": architecture,
     }
     if windows:

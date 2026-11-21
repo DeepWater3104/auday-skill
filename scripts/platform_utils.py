@@ -15,6 +15,10 @@ def is_windows():
     return sys.platform == "win32"
 
 
+def is_linux():
+    return sys.platform.startswith("linux")
+
+
 def _user_home():
     try:
         return Path.home()
@@ -29,6 +33,11 @@ def default_home():
     if is_windows():
         local = os.environ.get("LOCALAPPDATA")
         return (Path(local) if local else _user_home() / "AppData" / "Local") / "AudayWorkflow"
+    if is_linux():
+        # bootstrap.sh applies the same XDG rule before Python exists.
+        data = os.environ.get("XDG_DATA_HOME")
+        return (Path(data) if data and Path(data).is_absolute()
+                else _user_home() / ".local" / "share") / "AudayWorkflow"
     return _user_home() / "Library" / "Application Support" / "AudayWorkflow"
 
 

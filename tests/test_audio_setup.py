@@ -287,7 +287,7 @@ class AudioSetupTests(unittest.TestCase):
         self.shared.host_architecture.return_value = "x86"
         with patch.object(audio_setup.platform, "system", return_value="Windows"), \
                 patch.object(audio_setup.platform, "machine", return_value="x86"):
-            with self.assertRaisesRegex(RuntimeError, "requires_macos_or_windows_x64"):
+            with self.assertRaisesRegex(RuntimeError, "managed_audio_requires_macos"):
                 audio_setup.setup_audio(self.root)
         self.shared.ensure_uv.assert_not_called()
         self.shared.download_asset.assert_not_called()

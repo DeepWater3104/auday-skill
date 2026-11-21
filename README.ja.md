@@ -68,7 +68,8 @@ Agent はキーワード検索に加え、概念や言い換えを探す[ロー�
 
 - **Windows：**Windows 10/11 x64 と Windows 11 ARM64 に対応します。Agent が PowerShell 5.1 の設定スクリプトで OS のネイティブアーキテクチャを検出し、専用の `uv` 0.13.3、ネイティブの Python 3.13.16、および対応するローカルモデル実行プログラムを準備します。CPU での実行を基本とし、GPU、WSL、Homebrew、MSVC ビルドツール、既存のグローバル Python は不要です。
 - **Mac：**基本クライアントは macOS 13 以降、指定の意味検索実行環境は macOS 13.3 以降に対応します。iPhone への接続と組み込み音声ツールのビルドには、Swift 5.9 以降を含む Xcode Command Line Tools が必要です。Agent が有無を確認し、必要なら Apple のインストーラーを起動します。本人による操作が必要なシステム画面は、この Mac 上で処理します。初回設定スクリプトが必要に応じて専用の `uv` と管理対象の Python を準備するため、既存のグローバル Python や Homebrew は不要です。
-- Linux と Windows 10 ARM64 は現在の対応範囲に含まれません。オプションのローカルモデルには別途 CPU 要件があり、設定時に機能ごとに検証します。
+- **Linux（このフォーク）：** x86_64 または ARM64 の glibc デスクトップ環境に対応します（Ubuntu 26.04 x86_64 で確認）。`scripts/bootstrap.sh` が専用の `uv` と Python 3.13.16 を準備し、Windows と同じ Python 版の TLS-PSK 接続を使います。ペアリングの保存には Secret Service のキーリング（GNOME Keyring または KWallet）と `secret-tool`（`sudo apt install libsecret-tools`）が、音声ツールのビルドには `build-essential` が必要です。
+- Windows 10 ARM64 は現在の対応範囲に含まれません。オプションのローカルモデルには別途 CPU 要件があり、設定時に機能ごとに検証します。
 - 「Connect to your workflow」に対応した Auday の iPhone 版。iPhone とコンピューターは同じ Wi-Fi に接続してください。
 - モデルはパッケージに同梱していません。選んだ機能の設定時に Agent がダウンロードし、ハッシュとローカルでの動作を確認します。
 

@@ -69,7 +69,8 @@ class WindowsLauncherTests(unittest.TestCase):
                 secure_directory=lambda path: path.mkdir(parents=True, exist_ok=True),
                 exclusive_file_lock=lambda path: nullcontext(),
             )
-            python = runtime.windows_link_python(root)
+            with patch.object(runtime.sys, "platform", "win32"):
+                python = runtime.windows_link_python(root)
             calls = []
 
             def run(command, **kwargs):
@@ -109,7 +110,8 @@ class WindowsLauncherTests(unittest.TestCase):
                 secure_directory=lambda path: path.mkdir(parents=True, exist_ok=True),
                 exclusive_file_lock=lambda path: nullcontext(),
             )
-            python = runtime.windows_link_python(root)
+            with patch.object(runtime.sys, "platform", "win32"):
+                python = runtime.windows_link_python(root)
 
             def run(command, **kwargs):
                 if "venv" in command:

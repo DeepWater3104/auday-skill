@@ -29,8 +29,9 @@ In the remaining examples, `<auday>` means that full platform-specific prefix, w
 | Windows x64 | Windows 10/11, Windows PowerShell 5.1 | Native private Python 3.13.16; no pre-installed Python, WSL, Homebrew, MSVC, or separate GPU is needed |
 | Windows ARM64 | Windows 11, Windows PowerShell 5.1 | Native private Python 3.13.16 and ARM64 model runtimes; the same commands and no developer tools are needed |
 | macOS | macOS 13 or later; Apple Silicon or Intel | Private Python 3.12.15; the pinned semantic runtime requires macOS 13.3 or later; connection/audio builds require Apple developer tools |
+| Linux | glibc x86_64 or ARM64 desktop, `/bin/sh` | Private Python 3.13.16 with the Python connection used on Windows; pairing storage needs a Secret Service keyring and `secret-tool`; the audio build needs `cc`, `c++` and `make` |
 
-Linux and Windows 10 ARM64 are outside this setup baseline. The Windows entrypoint detects the native OS architecture even from an emulated x64 agent; use its result rather than the agent process's architecture. Check each capability independently: an unavailable optional runtime must not block available connection, keyword search, or readable exports. Do not install a binary for a different architecture.
+Windows 10 ARM64 is outside this setup baseline. On Linux, `check` reports `secretToolInstalled` and `buildToolsInstalled`; when one is missing, ask the user to run `sudo apt install libsecret-tools` or `sudo apt install build-essential` themselves, and never run sudo for them. Pairing on Linux opens a terminal window when a desktop session is available; otherwise `pair-window` returns a `launcher` script that the user runs in their own terminal on that computer. The Windows entrypoint detects the native OS architecture even from an emulated x64 agent; use its result rather than the agent process's architecture. Check each capability independently: an unavailable optional runtime must not block available connection, keyword search, or readable exports. Do not install a binary for a different architecture.
 
 ## Prepare the base environment
 

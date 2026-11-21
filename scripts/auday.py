@@ -1215,7 +1215,7 @@ def bridge():
 
 
 def bridge_command():
-    if is_windows():
+    if is_windows() or sys.platform.startswith("linux"):
         return [sys.executable, str(HERE / "windows_link.py")]
     return [str(bridge())]
 
@@ -1321,7 +1321,7 @@ def main():
                 "version": (HERE.parent / "VERSION").read_text().strip(),
                 "companionProtocol": "auday-workflow-link-v2",
                 "phoneSupport": "compatible-build-required",
-                "liveConnectionSupported": sys.platform in ("darwin", "win32"),
+                "liveConnectionSupported": sys.platform in ("darwin", "win32") or sys.platform.startswith("linux"),
                 "dataRoot": str(args.home.expanduser().resolve()),
                 "dataRootSource": home_source,
                 "runtimeRoot": str(data_root.support_root(args.home)),
@@ -1424,6 +1424,24 @@ def main():
                     subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE,
                                      close_fds=True, env=environment)
                     dump({"status": "awaiting_local_password_input"})
+                    return
+                if sys.platform.startswith("linux"):
+                    # The password goes to a terminal the user owns, never this process.
+                    launcher = app.root / "pair.sh"
+                    launcher.write_text("#!/bin/sh\n" + shlex.join(command) + "\n", encoding="utf-8")
+                    os.chmod(launcher, 0o700)
+                    graphical = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+                    terminal = next((path for path in ("/usr/bin/gnome-terminal", "/usr/bin/x-terminal-emulator")
+                                     if graphical and os.access(path, os.X_OK)), None)
+                    if terminal:
+                        subprocess.Popen([terminal, "--", str(launcher)], close_fds=True,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    dump({
+                        "status": "awaiting_local_password_input",
+                        "launcher": str(launcher),
+                        "terminalOpened": bool(terminal),
+                        "nextStep": None if terminal else "user_runs_launcher_in_own_terminal",
+                    })
                     return
                 launcher = app.root / "pair.command"
                 launcher.write_text("#!/bin/zsh\n" + shlex.join(command) + "\n", encoding="utf-8")

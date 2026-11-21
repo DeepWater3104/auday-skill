@@ -34,12 +34,14 @@ def host_system():
         return "macos"
     if sys.platform == "win32":
         return "windows"
-    raise ValueError("setup_requires_macos_or_windows")
+    if sys.platform.startswith("linux"):
+        return "linux"
+    raise ValueError("setup_requires_macos_windows_or_linux")
 
 
 def managed_python_version():
-    # Python 3.13 adds the TLS-PSK client API used by the Windows transport.
-    return WINDOWS_PYTHON_VERSION if sys.platform == "win32" else PYTHON_VERSION
+    # Python 3.13 adds the TLS-PSK client API used by the Windows and Linux transport.
+    return PYTHON_VERSION if sys.platform == "darwin" else WINDOWS_PYTHON_VERSION
 
 
 def managed_python_request():
@@ -89,6 +91,8 @@ def require_supported_system(minimum_macos="13.0"):
     system = host_system()
     if system == "macos":
         require_macos(minimum_macos)
+    elif system == "linux":
+        host_architecture()
     else:
         version = sys.getwindowsversion()
         if version.major < 10:
@@ -431,8 +435,9 @@ def ensure_python(root, uv_path=None):
     if not executable.is_file() or not executable.is_relative_to(support_root(root) / "runtime/python"):
         raise ValueError("python_runtime_outside_private_setup")
     probe = f"import ssl,sqlite3,sys; assert sys.version_info[:3] == {tuple(map(int, version.split('.')))!r}"
-    if sys.platform == "win32":
+    if sys.platform != "darwin":
         probe += "; assert ssl.HAS_PSK; assert hasattr(ssl.SSLContext, 'set_psk_client_callback')"
+    if sys.platform == "win32":
         expected = "win-arm64" if host_architecture() == "arm64" else "win-amd64"
         probe += f"; import sysconfig; assert sysconfig.get_platform().lower() == {expected!r}, 'native_python_architecture_required'"
     subprocess.run([str(executable), "-I", "-c", probe], env=environment, check=True, timeout=30)
@@ -442,8 +447,14 @@ def ensure_python(root, uv_path=None):
 def command_line_tools_status():
     if sys.platform == "win32":
         return {"ready": True, "reason": None, "toolchain": "not_required"}
+    if sys.platform.startswith("linux"):
+        # The connection needs no compiler; saving the pairing needs libsecret.
+        if not shutil.which("/usr/bin/secret-tool"):
+            return {"ready": False, "reason": "secret_tool_missing",
+                    "nextStep": "user_runs_sudo_apt_install_libsecret_tools"}
+        return {"ready": True, "reason": None, "toolchain": "secret_service"}
     if sys.platform != "darwin":
-        return {"ready": False, "reason": "macos_or_windows_required"}
+        return {"ready": False, "reason": "macos_windows_or_linux_required"}
     selected = subprocess.run(["/usr/bin/xcode-select", "-p"], capture_output=True, text=True, timeout=10)
     if selected.returncode:
         return {"ready": False, "reason": "apple_command_line_tools_missing",
@@ -461,13 +472,14 @@ def command_line_tools_status():
 
 
 def windows_link_python(root):
-    return support_root(root) / "runtime/windows-link/venv/Scripts/python.exe"
+    venv = support_root(root) / "runtime/windows-link/venv"
+    return venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
 
 def ensure_windows_link(root, uv_path=None, python_path=None):
     """Prepare only the small locked connection environment, never optional models."""
-    if sys.platform != "win32":
-        raise ValueError("windows_link_runtime_requires_windows")
+    if sys.platform != "win32" and not sys.platform.startswith("linux"):
+        raise ValueError("windows_link_runtime_requires_windows_or_linux")
     from platform_utils import exclusive_file_lock, secure_directory
 
     root = support_root(root)
@@ -496,7 +508,7 @@ def ensure_windows_link(root, uv_path=None, python_path=None):
             base_python = Path(python_path) if python_path else ensure_python(root, uv)
             destination.mkdir(parents=True, mode=0o700)
             try:
-                report("Preparing private Windows connection runtime", force=True)
+                report("Preparing private connection runtime", force=True)
                 subprocess.run(
                     [str(uv), "--no-config", "venv", "--python", str(base_python), str(destination / "venv")],
                     env=environment, check=True, timeout=120, stdout=subprocess.DEVNULL,
@@ -532,6 +544,9 @@ def _probe_windows_link(python, environment, *, architecture):
         raise ValueError("windows_connection_runtime_probe_failed") from None
     if not isinstance(result, dict) or result.get("ok") is not True or result.get("tlsPSK") is not True:
         raise ValueError("windows_connection_runtime_probe_failed")
-    expected = "win-arm64" if architecture == "arm64" else "win-amd64"
+    if sys.platform.startswith("linux"):
+        expected = "linux-aarch64" if architecture == "arm64" else "linux-x86_64"
+    else:
+        expected = "win-arm64" if architecture == "arm64" else "win-amd64"
     if result.get("interpreterPlatform") != expected:
         raise ValueError("windows_connection_runtime_architecture_mismatch")

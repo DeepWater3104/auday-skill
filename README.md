@@ -69,7 +69,8 @@ Your synchronized SQLite database persists after restarting the computer. Sync a
 - **Windows:** Windows 10/11 x64 or Windows 11 ARM64, with Windows PowerShell 5.1. Setup detects the native OS architecture and prepares private `uv` 0.13.3, native Python 3.13.16, and matching CPU model runtimes. No pre-installed Python, WSL, MSVC, or GPU is required.
 - **Mac:** macOS 13 or later for the core client; macOS 13.3 or later for the pinned semantic runtime. Phone connection and the audio build need Xcode Command Line Tools with Swift 5.9 or later; the agent can start Apple's installer if they are missing.
 - An Auday iPhone build with **Connect to your workflow**, with both devices connected to the same Wi-Fi.
-- Linux and Windows 10 ARM64 are outside the supported setup baseline. Optional local model engines have their own CPU requirements; setup verifies each selected capability.
+- **Linux (this fork):** x86_64 or ARM64 glibc desktop, tested on Ubuntu 26.04 x86_64. `scripts/bootstrap.sh` prepares private `uv` and Python 3.13.16 and runs the same Python TLS-PSK connection as Windows. Saving the pairing needs a Secret Service keyring (GNOME Keyring or KWallet) and `secret-tool` (`sudo apt install libsecret-tools`); the audio build needs `build-essential`.
+- Windows 10 ARM64 is outside the supported setup baseline. Optional local model engines have their own CPU requirements; setup verifies each selected capability.
 - Models are not bundled. The agent installs selected semantic or transcription assets during their setup flow, verifies their hashes, and checks that they run locally.
 
 Core connection and context retrieval do not require an AI API key, an Auday cloud account, or a cloud relay.

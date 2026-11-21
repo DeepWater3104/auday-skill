@@ -1,12 +1,21 @@
 #!/bin/sh
-# Start with macOS system tools only; do not require a user's Python or Homebrew.
+# Start with macOS or Linux system tools only; do not require a user's Python or Homebrew.
 set -eu
 umask 077
 auday_script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # Data root order, matching scripts/data_root.py: --home, AUDAY_HOME, the saved
 # one-line setting written by `data-root --save`, the earlier default location while it
 # holds a paired profile and the visible default does not, then ~/Auday.
-auday_app_root="$HOME/Library/Application Support/AudayWorkflow"
+auday_kernel=$(/usr/bin/uname -s)
+if [ "$auday_kernel" = Linux ]; then
+    # Same XDG rule as platform_utils.default_home.
+    case "${XDG_DATA_HOME-}" in
+        /*) auday_app_root="$XDG_DATA_HOME/AudayWorkflow" ;;
+        *) auday_app_root="$HOME/.local/share/AudayWorkflow" ;;
+    esac
+else
+    auday_app_root="$HOME/Library/Application Support/AudayWorkflow"
+fi
 auday_visible_root="$HOME/Auday"
 auday_json() { printf '%s' "$1" | /usr/bin/sed 's/\\/\\\\/g; s/"/\\"/g'; }
 auday_has_pairing() {
@@ -80,25 +89,59 @@ esac
 case "$auday_data_root" in *[[:cntrl:]]*)
     printf '%s\n' 'Auday: the data root must not contain control characters.' >&2; exit 2 ;;
 esac
-if [ "$(/usr/bin/uname -s)" != Darwin ]; then
-    printf '%s\n' '{"ok":false,"error":"macOS_required"}'
-    exit 1
-fi
-auday_arch=$(/usr/bin/uname -m)
-if [ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
-    auday_arch=arm64
-fi
-case "$auday_arch" in arm64|x86_64) ;; *)
-    printf '%s\n' '{"ok":false,"error":"unsupported_mac_architecture"}'; exit 1 ;;
+case "$auday_kernel" in Darwin|Linux) ;; *)
+    printf '%s\n' '{"ok":false,"error":"macOS_or_linux_required"}'
+    exit 1 ;;
 esac
-auday_os=$(/usr/bin/sw_vers -productVersion)
-auday_major=$(printf '%s' "$auday_os" | /usr/bin/awk -F. '{print $1}')
-if [ "$auday_major" -lt 13 ]; then
-    printf '%s\n' '{"ok":false,"error":"macOS_13_or_later_required"}'
-    exit 1
+auday_arch=$(/usr/bin/uname -m)
+if [ "$auday_kernel" = Linux ]; then
+    [ "$auday_arch" = aarch64 ] && auday_arch=arm64
+    case "$auday_arch" in arm64|x86_64) ;; *)
+        printf '%s\n' '{"ok":false,"error":"unsupported_linux_architecture"}'; exit 1 ;;
+    esac
+    auday_platform=linux
+    # Python 3.13 adds the TLS-PSK client API used by the Python connection.
+    auday_python_version=3.13.16
+    auday_sha256() { /usr/bin/sha256sum "$1" | /usr/bin/awk '{print $1}'; }
+    for auday_tool in /usr/bin/curl /usr/bin/tar /usr/bin/sha256sum; do
+        [ -x "$auday_tool" ] || {
+            printf '{"ok":false,"error":"system_tool_missing","tool":"%s","nextStep":"user_runs_sudo_apt_install_curl"}\n' "$auday_tool"
+            exit 1
+        }
+    done
+else
+    if [ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
+        auday_arch=arm64
+    fi
+    case "$auday_arch" in arm64|x86_64) ;; *)
+        printf '%s\n' '{"ok":false,"error":"unsupported_mac_architecture"}'; exit 1 ;;
+    esac
+    auday_os=$(/usr/bin/sw_vers -productVersion)
+    auday_major=$(printf '%s' "$auday_os" | /usr/bin/awk -F. '{print $1}')
+    if [ "$auday_major" -lt 13 ]; then
+        printf '%s\n' '{"ok":false,"error":"macOS_13_or_later_required"}'
+        exit 1
+    fi
+    auday_platform=macos
+    auday_python_version=3.12.15
+    auday_sha256() { /usr/bin/shasum -a 256 "$1" | /usr/bin/awk '{print $1}'; }
+    auday_clt=false
+    if /usr/bin/xcode-select -p >/dev/null 2>&1; then auday_clt=true; fi
 fi
-auday_clt=false
-if /usr/bin/xcode-select -p >/dev/null 2>&1; then auday_clt=true; fi
+if [ "$auday_command" = check ] && [ "$auday_platform" = linux ]; then
+    auday_probe_dir="$auday_data_root"
+    while [ ! -d "$auday_probe_dir" ]; do auday_probe_dir=$(/usr/bin/dirname "$auday_probe_dir"); done
+    auday_free_kb=$(/bin/df -Pk "$auday_probe_dir" | /usr/bin/awk 'NR==2 {print $4}')
+    auday_memory_kb=$(/usr/bin/awk '$1=="MemTotal:" {print $2}' /proc/meminfo)
+    auday_os=$( (. /etc/os-release && printf '%s' "${PRETTY_NAME-Linux}") 2>/dev/null || printf 'Linux')
+    auday_secret=false
+    [ -x /usr/bin/secret-tool ] && auday_secret=true
+    auday_compiler=false
+    [ -x /usr/bin/cc ] && [ -x /usr/bin/c++ ] && [ -x /usr/bin/make ] && auday_compiler=true
+    printf '{"ok":true,"linux":"%s","architecture":"%s","memoryBytes":%s,"availableDiskBytes":%s,"secretToolInstalled":%s,"buildToolsInstalled":%s,"dataRoot":"%s","dataRootSource":"%s","downloadsStarted":false,"nextStep":"run bootstrap doctor to prepare the private base runtime"}\n' \
+        "$(auday_json "$auday_os")" "$auday_arch" "$((auday_memory_kb * 1024))" "$((auday_free_kb * 1024))" "$auday_secret" "$auday_compiler" "$(auday_json "$auday_data_root")" "$auday_root_source"
+    exit 0
+fi
 if [ "$auday_command" = check ]; then
     auday_probe_dir="$auday_data_root"
     while [ ! -d "$auday_probe_dir" ]; do auday_probe_dir=$(/usr/bin/dirname "$auday_probe_dir"); done
@@ -133,7 +176,7 @@ if [ ! -d "$auday_data_root/runtime/python" ]; then
         auday_runtime_root=$(CDPATH= cd -P -- "$auday_app_root" && pwd)
     fi
 fi
-auday_row=$(/usr/bin/awk -F '\t' -v arch="$auday_arch" '$1=="uv" && $2==arch && $10=="macos" {print}' "$auday_script_dir/runtime-assets.tsv")
+auday_row=$(/usr/bin/awk -F '\t' -v arch="$auday_arch" -v platform="$auday_platform" '$1=="uv" && $2==arch && $10==platform {print}' "$auday_script_dir/runtime-assets.tsv")
 [ -n "$auday_row" ] || { printf '%s\n' 'Auday: runtime manifest entry missing.' >&2; exit 1; }
 auday_tab=$(printf '\t')
 IFS="$auday_tab" read -r auday_component auday_manifest_arch auday_url auday_sha auday_bytes auday_install_dir auday_archive_root auday_executable auday_min_os auday_platform auday_archive_format <<EOF
@@ -155,7 +198,7 @@ else
         /usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' \
             --connect-timeout 20 --max-time 600 --retry 2 --continue-at - \
             --progress-bar --output "$auday_archive.partial" "$auday_url"
-        auday_actual=$(/usr/bin/shasum -a 256 "$auday_archive.partial" | /usr/bin/awk '{print $1}')
+        auday_actual=$(auday_sha256 "$auday_archive.partial")
         if [ "$auday_actual" != "$auday_sha" ]; then
             /bin/mv "$auday_archive.partial" "$auday_archive.partial.corrupt.$(/bin/date +%s)"
             printf '%s\n' 'Auday: runtime download failed its integrity check; a retry will start clean.' >&2
@@ -163,7 +206,7 @@ else
         fi
         /bin/mv "$auday_archive.partial" "$auday_archive"
     fi
-    auday_actual=$(/usr/bin/shasum -a 256 "$auday_archive" | /usr/bin/awk '{print $1}')
+    auday_actual=$(auday_sha256 "$auday_archive")
     [ "$auday_actual" = "$auday_sha" ] ||
         { printf '%s\n' 'Auday: cached runtime failed its integrity check.' >&2; exit 1; }
     printf '%s\n' '[Auday] Installing verified private setup runtime' >&2
@@ -186,20 +229,25 @@ done
 export UV_NO_CONFIG=1
 export UV_CACHE_DIR="$auday_runtime_root/cache/uv"
 export UV_PYTHON_INSTALL_DIR="$auday_runtime_root/runtime/python"
-export UV_PYTHON=3.12.15
+export UV_PYTHON=$auday_python_version
 export UV_MANAGED_PYTHON=1
 export PYTHONNOUSERSITE=1
 unset PYTHONPATH PYTHONHOME VIRTUAL_ENV UV_PROJECT_ENVIRONMENT UV_ENV_FILE
-auday_python=$("$auday_uv" --no-config python find --managed-python cpython@3.12.15 2>/dev/null) || auday_python=""
+auday_python=$("$auday_uv" --no-config python find --managed-python "cpython@$auday_python_version" 2>/dev/null) || auday_python=""
 if [ -z "$auday_python" ]; then
     printf '%s\n' '[Auday] Preparing private Python runtime' >&2
-    "$auday_uv" --no-config python install cpython@3.12.15 --no-bin
-    auday_python=$("$auday_uv" --no-config python find --managed-python cpython@3.12.15)
+    "$auday_uv" --no-config python install "cpython@$auday_python_version" --no-bin
+    auday_python=$("$auday_uv" --no-config python find --managed-python "cpython@$auday_python_version")
 fi
 case "$auday_python" in "$auday_runtime_root/runtime/python/"*) ;; *)
     printf '%s\n' 'Auday: refusing an interpreter outside the private runtime.' >&2; exit 1 ;;
 esac
-"$auday_python" -I -c 'import ssl, sqlite3, sys; assert sys.version_info[:3] == (3, 12, 15)'
 [ "$#" -gt 0 ] || set -- setup
 export AUDAY_RUNTIME_ROOT="$auday_runtime_root"
+if [ "$auday_platform" = linux ]; then
+    "$auday_python" -I -c 'import ssl, sqlite3, sys; assert sys.version_info[:3] == (3, 13, 16); assert ssl.HAS_PSK'
+    # Like Windows: the client runs in the small locked connection environment.
+    exec "$auday_python" "$auday_script_dir/bootstrap_windows.py" --home "$auday_data_root" "$@"
+fi
+"$auday_python" -I -c 'import ssl, sqlite3, sys; assert sys.version_info[:3] == (3, 12, 15)'
 exec "$auday_python" "$auday_script_dir/auday.py" --home "$auday_data_root" "$@"
